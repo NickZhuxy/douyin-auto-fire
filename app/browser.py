@@ -46,6 +46,10 @@ async def open_douyin(settings: Settings) -> AsyncIterator[BrowserSession]:
             state = parse_auth_json(settings.storage_state, "DOUYIN_STORAGE_STATE")
             if not isinstance(state, dict):
                 raise ConfigError("DOUYIN_STORAGE_STATE 必须是 JSON 对象")
+            logging.getLogger("douyin_sender").info(
+                "Storage state metadata (no values): origins=%d, cookies=%s",
+                len(state.get("origins", [])), _auth_cookie_summary(state.get("cookies", [])),
+            )
             context_args["storage_state"] = state
         context = await browser.new_context(**context_args)
         if not settings.storage_state and settings.cookie:

@@ -22,6 +22,7 @@ jobs:
     permissions:
       contents: read
     env:
+      DOUYIN_STORAGE_STATE: ${{ secrets.DOUYIN_STORAGE_STATE }}
       DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
       DOUYIN_CONFIG: ${{ secrets.DOUYIN_CONFIG }}
       DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}

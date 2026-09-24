@@ -48,7 +48,8 @@
 
 | Secret | 内容 | 必需 |
 | --- | --- | --- |
-| `DOUYIN_COOKIE` | 上一步导出的 Cookie JSON | 是 |
+| `DOUYIN_COOKIE` | 上一步导出的 Cookie JSON | 与完整登录状态二选一 |
+| `DOUYIN_STORAGE_STATE` | Playwright 导出的完整 storage state JSON，包含 Cookie 和 localStorage，优先使用 | 与 Cookie 二选一 |
 | `DOUYIN_CONFIG` | 完整发送配置 JSON | 是 |
 | `DINGTALK_WEBHOOK` | 钉钉机器人 Webhook | 否 |
 | `DINGTALK_SECRET` | 钉钉机器人 Secret | 否 |
@@ -167,6 +168,11 @@ schedule:
 3. 更新 GitHub Secret `DOUYIN_COOKIE`；
 4. 先手动运行一次 `dry_run = true`。
 
+也可以使用 `python scripts/login.py` 导出的 `storage-state.json`，通过
+`gh secret set DOUYIN_STORAGE_STATE --repo OWNER/REPO < storage-state.json` 更新完整登录状态。
+已配置该 Secret 时它优先于 `DOUYIN_COOKIE`；后续刷新应更新同一个 Secret。
+
+完整登录状态可以保留 localStorage，但不能保证会话不会被服务端撤销。
 GitHub Actions 不会自动扫码登录，也不会绕过验证码或安全验证。
 
 ## 8. 失败日志
