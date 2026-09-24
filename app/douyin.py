@@ -13,7 +13,7 @@ class PageOperationError(RuntimeError):
 
 
 class DouyinChat:
-    def __init__(self, page: Page, timeout_ms: int = 15_000) -> None:
+    def __init__(self, page: Page, timeout_ms: int = 60_000) -> None:
         self.page = page
         self.timeout_ms = timeout_ms
 

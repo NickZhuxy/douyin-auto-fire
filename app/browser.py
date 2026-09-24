@@ -19,6 +19,10 @@ class AuthenticationError(RuntimeError):
     pass
 
 
+class PageLoadError(RuntimeError):
+    pass
+
+
 class RiskControlError(RuntimeError):
     pass
 
@@ -84,14 +88,14 @@ async def verify_login(page: Page, timeout_ms: int = 15_000) -> None:
         raise AuthenticationError("未检测到抖音私信页面，登录状态可能失效或页面结构已变化")
 
 
-async def open_private_messages(page: Page, timeout_ms: int = 15_000) -> None:
+async def open_private_messages(page: Page, timeout_ms: int = 60_000) -> None:
     await page.goto(DOUYIN_CHAT_URL, wait_until="domcontentloaded", timeout=45_000)
     if await _any_visible(page, RISK_MARKERS, timeout_ms=2_000):
         raise RiskControlError("抖音私信页面要求进行安全验证，任务已停止")
     if await _any_visible(page, LOGIN_REQUIRED_MARKERS, timeout_ms=2_000):
         raise AuthenticationError("进入抖音私信页面后登录状态失效")
     if not await _any_visible(page, ('input[placeholder*="搜索"]', '[role="textbox"][placeholder*="搜索"]'), timeout_ms):
-        raise AuthenticationError("已进入抖音私信页面，但没有检测到好友搜索框")
+        raise PageLoadError("抖音聊天页面未加载完成：等待好友搜索框超时，不能据此判定登录失效")
 
 
 async def save_trace(session: BrowserSession, path: Path) -> None:

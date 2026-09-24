@@ -39,6 +39,8 @@ jobs:
         shell: bash
         run: printf '%s' "$DOUYIN_CONFIG" > config.json
       - name: Run
+        env:
+          DOUYIN_STORAGE_STATE: ""
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
