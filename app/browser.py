@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import time
+
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +16,10 @@ from app.selectors import DOUYIN_CHAT_URL, LOGIN_MARKERS, LOGIN_REQUIRED_MARKERS
 
 
 class AuthenticationError(RuntimeError):
+    pass
+
+
+class PageLoadError(RuntimeError):
     pass
 
 
@@ -49,7 +56,11 @@ async def open_douyin(settings: Settings) -> AsyncIterator[BrowserSession]:
             cookies = parse_auth_json(settings.cookie, "DOUYIN_COOKIE")
             if not isinstance(cookies, list):
                 raise ConfigError("DOUYIN_COOKIE 必须是 Cookie 数组")
-            await context.add_cookies(_normalize_cookies(cookies))
+            normalized = _normalize_cookies(cookies)
+            logging.getLogger("douyin_sender").info(
+                "Cookie metadata (no values): %s", _auth_cookie_summary(normalized)
+            )
+            await context.add_cookies(normalized)
 
         page = await context.new_page()
         if settings.trace:
@@ -73,14 +84,14 @@ async def verify_login(page: Page, timeout_ms: int = 15_000) -> None:
         raise AuthenticationError("未检测到抖音私信页面，登录状态可能失效或页面结构已变化")
 
 
-async def open_private_messages(page: Page, timeout_ms: int = 15_000) -> None:
+async def open_private_messages(page: Page, timeout_ms: int = 60_000) -> None:
     await page.goto(DOUYIN_CHAT_URL, wait_until="domcontentloaded", timeout=45_000)
     if await _any_visible(page, RISK_MARKERS, timeout_ms=2_000):
         raise RiskControlError("抖音私信页面要求进行安全验证，任务已停止")
     if await _any_visible(page, LOGIN_REQUIRED_MARKERS, timeout_ms=2_000):
         raise AuthenticationError("进入抖音私信页面后登录状态失效")
     if not await _any_visible(page, ('input[placeholder*="搜索"]', '[role="textbox"][placeholder*="搜索"]'), timeout_ms):
-        raise AuthenticationError("已进入抖音私信页面，但没有检测到好友搜索框")
+        raise PageLoadError("抖音聊天页面未加载完成：等待好友搜索框超时，不能据此判定登录失效")
 
 
 async def save_trace(session: BrowserSession, path: Path) -> None:
@@ -146,3 +157,16 @@ def _normalize_same_site(value: Any) -> str:
         "no_restriction": "None",
     }
     return mapping.get(str(value).lower(), "Lax")
+
+
+def _auth_cookie_summary(cookies: list[dict[str, Any]]) -> dict[str, int]:
+    """Only emit aggregate metadata; never cookie values or arbitrary names."""
+    auth = [c for c in cookies if c.get("name") in {"sessionid", "sessionid_ss", "sid_tt"}]
+    now = time.time()
+    return {
+        "total": len(cookies),
+        "auth_present": len(auth),
+        "auth_expired": sum(0 <= c.get("expires", -1) <= now for c in auth),
+        "auth_session": sum(c.get("expires", -1) == -1 for c in auth),
+        "all_expired": sum(0 <= c.get("expires", -1) <= now for c in cookies),
+    }

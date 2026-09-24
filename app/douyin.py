@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from playwright.async_api import Locator, Page
 
 from app.selectors import MESSAGE_INPUTS, SEARCH_INPUTS
@@ -10,7 +12,7 @@ class PageOperationError(RuntimeError):
 
 
 class DouyinChat:
-    def __init__(self, page: Page, timeout_ms: int = 15_000) -> None:
+    def __init__(self, page: Page, timeout_ms: int = 60_000) -> None:
         self.page = page
         self.timeout_ms = timeout_ms
 
@@ -19,17 +21,16 @@ class DouyinChat:
         await search.click()
         await search.fill("")
         await search.fill(name)
-        await self.page.wait_for_timeout(1_500)
-
+        deadline = asyncio.get_running_loop().time() + self.timeout_ms / 1000
         result = await self._search_result(name)
+        while result is None and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.25)
+            result = await self._search_result(name)
         if result is None:
-            # Save the visible text in the exception for selector troubleshooting without
-            # exposing cookies or storage state.
-            visible_text = (await self.page.locator("body").inner_text())[:500].replace("\n", " ")
-            raise PageOperationError(f"搜索不到好友: {name}；当前页面文字: {visible_text}")
-        await result.evaluate("el => el.click()")
-        await self.page.wait_for_timeout(1_500)
-        await self._confirm_opened(name)
+            raise PageOperationError(f"搜索不到可见好友: {name}")
+        await result.click(timeout=self.timeout_ms)
+        await self._wait_for_opened(name)
+        await self.message_input()
 
     async def _search_result(self, name: str) -> Locator | None:
         # Search mode renders a separate SearchPanel. Its "发消息" action is the
@@ -39,7 +40,7 @@ class DouyinChat:
         for index in range(await search_items.count()):
             item = search_items.nth(index)
             button = item.locator('[class*="SearchPanelitemchat_btn"]').first
-            if await button.count():
+            if await button.count() and await button.is_visible():
                 return button
 
         # The nickname node can be hidden while its conversation row is visible.
@@ -55,6 +56,8 @@ class DouyinChat:
             for index in range(await rows.count()):
                 row = rows.nth(index)
                 try:
+                    if not await row.is_visible():
+                        continue
                     class_name = await row.get_attribute("class") or ""
                     if "wrapper" in class_name or await row.get_attribute("data-e2e") == "conversation-item":
                         return row
@@ -95,6 +98,17 @@ class DouyinChat:
 
     async def message_input(self) -> Locator:
         return await first_visible(self.page, MESSAGE_INPUTS, self.timeout_ms)
+
+    async def _wait_for_opened(self, name: str) -> None:
+        deadline = asyncio.get_running_loop().time() + self.timeout_ms / 1000
+        while True:
+            try:
+                await self._confirm_opened(name)
+                return
+            except PageOperationError:
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise
+                await asyncio.sleep(0.25)
 
     async def _confirm_opened(self, name: str) -> None:
         # Dry-run only needs to prove that the target conversation opened. Some
