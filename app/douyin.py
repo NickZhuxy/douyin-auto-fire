@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from playwright.async_api import Locator, Page
 
@@ -29,6 +30,7 @@ class DouyinChat:
             # exposing cookies or storage state.
             visible_text = (await self.page.locator("body").inner_text())[:500].replace("\n", " ")
             raise PageOperationError(f"搜索不到好友: {name}；当前页面文字: {visible_text}")
+        logging.getLogger("douyin_sender").info("Target control metadata: %s", await result.evaluate("el => ({tag: el.tagName, classes: el.className, visible: !!(el.offsetWidth || el.offsetHeight)})"))
         await result.evaluate("el => el.click()")
         await self._wait_for_opened(name)
 
@@ -105,6 +107,12 @@ class DouyinChat:
                 return
             except PageOperationError:
                 if asyncio.get_running_loop().time() >= deadline:
+                    metadata = await self.page.evaluate("""name => ({
+                        path: location.pathname,
+                        exactMatches: [...document.querySelectorAll('*')].filter(e => e.childElementCount === 0 && e.textContent.trim() === name).map(e => ({tag:e.tagName, classes:e.className, visible:!!(e.offsetWidth || e.offsetHeight)})).slice(0, 10),
+                        editors: [...document.querySelectorAll('[contenteditable="true"],textarea')].map(e => ({tag:e.tagName, classes:e.className, visible:!!(e.offsetWidth || e.offsetHeight)})).slice(0, 10)
+                    })""", name)
+                    logging.getLogger("douyin_sender").info("Chat structure metadata (no text): %s", metadata)
                     raise
                 await asyncio.sleep(0.25)
 
