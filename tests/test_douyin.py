@@ -60,7 +60,9 @@ async def test_waits_for_chat_after_delayed_navigation():
 @pytest.mark.asyncio
 async def test_chat_confirmation_failure_is_not_ignored():
     from app.douyin import PageOperationError
-    chat = DouyinChat(MagicMock(), timeout_ms=0)
+    page = MagicMock()
+    page.evaluate = AsyncMock(return_value={})
+    chat = DouyinChat(page, timeout_ms=0)
     chat._confirm_opened = AsyncMock(side_effect=PageOperationError("not opened"))
     with pytest.raises(PageOperationError, match="not opened"):
         await chat._wait_for_opened("friend")
