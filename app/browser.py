@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import time
+
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,7 +52,11 @@ async def open_douyin(settings: Settings) -> AsyncIterator[BrowserSession]:
             cookies = parse_auth_json(settings.cookie, "DOUYIN_COOKIE")
             if not isinstance(cookies, list):
                 raise ConfigError("DOUYIN_COOKIE 必须是 Cookie 数组")
-            await context.add_cookies(_normalize_cookies(cookies))
+            normalized = _normalize_cookies(cookies)
+            logging.getLogger("douyin_sender").info(
+                "Cookie metadata (no values): %s", _auth_cookie_summary(normalized)
+            )
+            await context.add_cookies(normalized)
 
         page = await context.new_page()
         if settings.trace:
@@ -146,3 +153,16 @@ def _normalize_same_site(value: Any) -> str:
         "no_restriction": "None",
     }
     return mapping.get(str(value).lower(), "Lax")
+
+
+def _auth_cookie_summary(cookies: list[dict[str, Any]]) -> dict[str, int]:
+    """Only emit aggregate metadata; never cookie values or arbitrary names."""
+    auth = [c for c in cookies if c.get("name") in {"sessionid", "sessionid_ss", "sid_tt"}]
+    now = time.time()
+    return {
+        "total": len(cookies),
+        "auth_present": len(auth),
+        "auth_expired": sum(0 <= c.get("expires", -1) <= now for c in auth),
+        "auth_session": sum(c.get("expires", -1) == -1 for c in auth),
+        "all_expired": sum(0 <= c.get("expires", -1) <= now for c in cookies),
+    }
