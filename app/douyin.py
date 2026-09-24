@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from playwright.async_api import Locator, Page
 
@@ -29,9 +28,9 @@ class DouyinChat:
             result = await self._search_result(name)
         if result is None:
             raise PageOperationError(f"搜索不到可见好友: {name}")
-        logging.getLogger("douyin_sender").info("Target control metadata: %s", await result.evaluate("el => ({tag: el.tagName, classes: el.className, visible: !!(el.offsetWidth || el.offsetHeight)})"))
         await result.click(timeout=self.timeout_ms)
         await self._wait_for_opened(name)
+        await self.message_input()
 
     async def _search_result(self, name: str) -> Locator | None:
         # Search mode renders a separate SearchPanel. Its "发消息" action is the
@@ -108,12 +107,6 @@ class DouyinChat:
                 return
             except PageOperationError:
                 if asyncio.get_running_loop().time() >= deadline:
-                    metadata = await self.page.evaluate("""name => ({
-                        path: location.pathname,
-                        exactMatches: [...document.querySelectorAll('*')].filter(e => e.childElementCount === 0 && e.textContent.trim() === name).map(e => ({tag:e.tagName, classes:e.className, visible:!!(e.offsetWidth || e.offsetHeight)})).slice(0, 10),
-                        editors: [...document.querySelectorAll('[contenteditable="true"],textarea')].map(e => ({tag:e.tagName, classes:e.className, visible:!!(e.offsetWidth || e.offsetHeight)})).slice(0, 10)
-                    })""", name)
-                    logging.getLogger("douyin_sender").info("Chat structure metadata (no text): %s", metadata)
                     raise
                 await asyncio.sleep(0.25)
 

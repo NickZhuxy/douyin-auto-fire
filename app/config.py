@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import base64
-import gzip
-import binascii
 import json
 import os
 from pathlib import Path
@@ -92,11 +89,6 @@ def load_task(settings: Settings) -> TaskConfig:
 
 
 def parse_auth_json(value: str, label: str) -> Any:
-    if value.startswith("gzip-base64:"):
-        try:
-            return json.loads(gzip.decompress(base64.b64decode(value[12:], validate=True)))
-        except (ValueError, OSError, EOFError, binascii.Error) as exc:
-            raise ConfigError(f"{label} 不是有效的压缩 JSON") from exc
     candidate = Path(value).expanduser()
     try:
         if candidate.is_file():

@@ -88,3 +88,13 @@ def test_auth_summary_does_not_expose_credentials() -> None:
         ])
     assert summary == {"total": 4, "auth_present": 3, "auth_expired": 1, "auth_session": 1, "all_expired": 2}
     assert "private" not in str(summary)
+
+
+@pytest.mark.asyncio
+async def test_unloaded_chat_is_not_reported_as_expired_login():
+    from app.browser import PageLoadError
+    page = MagicMock()
+    page.goto = AsyncMock()
+    with patch("app.browser._any_visible", new=AsyncMock(return_value=False)):
+        with pytest.raises(PageLoadError, match="未加载完成"):
+            await open_private_messages(page)

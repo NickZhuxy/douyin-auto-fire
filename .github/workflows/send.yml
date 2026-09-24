@@ -22,7 +22,6 @@ jobs:
     permissions:
       contents: read
     env:
-      DOUYIN_STORAGE_STATE: ${{ secrets.DOUYIN_STORAGE_STATE }}
       DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
       DOUYIN_CONFIG: ${{ secrets.DOUYIN_CONFIG }}
       DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
@@ -39,8 +38,6 @@ jobs:
         shell: bash
         run: printf '%s' "$DOUYIN_CONFIG" > config.json
       - name: Run
-        env:
-          DOUYIN_STORAGE_STATE: ""
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
@@ -48,12 +45,6 @@ jobs:
           else
             python run.py
           fi
-      - name: Encrypt private screenshot for investigation
-        if: failure()
-        shell: bash
-        run: |
-          tar -czf /tmp/douyin-screenshots.tar.gz artifacts/screenshots
-          openssl smime -encrypt -binary -aes256 -in /tmp/douyin-screenshots.tar.gz -out artifacts/private-diagnostic.enc -outform DER .github/diagnostic-cert.pem
       - name: Upload diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -62,6 +53,5 @@ jobs:
           path: |
             artifacts/run.log
             artifacts/result.json
-            artifacts/private-diagnostic.enc
           if-no-files-found: ignore
           retention-days: 3

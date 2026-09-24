@@ -99,15 +99,3 @@ def test_loads_simple_config(tmp_path: Path) -> None:
 
     assert len(task.targets) == 2
     assert task.targets[1].messages[0].content == "你好"
-
-
-def test_compressed_auth_state():
-    import base64
-    import gzip
-    import json
-    from app.config import parse_auth_json
-    state = {"cookies": [], "origins": [{"origin": "https://www.douyin.com", "localStorage": []}]}
-    encoded = "gzip-base64:" + base64.b64encode(gzip.compress(json.dumps(state).encode())).decode()
-    assert parse_auth_json(encoded, "state") == state
-    with pytest.raises(ConfigError):
-        parse_auth_json("gzip-base64:invalid", "state")
