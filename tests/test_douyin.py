@@ -46,3 +46,21 @@ async def test_search_result_ignores_hidden_exact_match() -> None:
     result = await DouyinChat(page)._search_result("好友")
 
     assert result is visible
+
+
+@pytest.mark.asyncio
+async def test_waits_for_chat_after_delayed_navigation():
+    from app.douyin import PageOperationError
+    chat = DouyinChat(MagicMock(), timeout_ms=1000)
+    chat._confirm_opened = AsyncMock(side_effect=[PageOperationError("loading"), None])
+    await chat._wait_for_opened("friend")
+    assert chat._confirm_opened.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_chat_confirmation_failure_is_not_ignored():
+    from app.douyin import PageOperationError
+    chat = DouyinChat(MagicMock(), timeout_ms=0)
+    chat._confirm_opened = AsyncMock(side_effect=PageOperationError("not opened"))
+    with pytest.raises(PageOperationError, match="not opened"):
+        await chat._wait_for_opened("friend")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from playwright.async_api import Locator, Page
 
 from app.selectors import MESSAGE_INPUTS, SEARCH_INPUTS
@@ -28,8 +30,7 @@ class DouyinChat:
             visible_text = (await self.page.locator("body").inner_text())[:500].replace("\n", " ")
             raise PageOperationError(f"搜索不到好友: {name}；当前页面文字: {visible_text}")
         await result.evaluate("el => el.click()")
-        await self.page.wait_for_timeout(1_500)
-        await self._confirm_opened(name)
+        await self._wait_for_opened(name)
 
     async def _search_result(self, name: str) -> Locator | None:
         # Search mode renders a separate SearchPanel. Its "发消息" action is the
@@ -95,6 +96,17 @@ class DouyinChat:
 
     async def message_input(self) -> Locator:
         return await first_visible(self.page, MESSAGE_INPUTS, self.timeout_ms)
+
+    async def _wait_for_opened(self, name: str) -> None:
+        deadline = asyncio.get_running_loop().time() + self.timeout_ms / 1000
+        while True:
+            try:
+                await self._confirm_opened(name)
+                return
+            except PageOperationError:
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise
+                await asyncio.sleep(0.25)
 
     async def _confirm_opened(self, name: str) -> None:
         # Dry-run only needs to prove that the target conversation opened. Some
