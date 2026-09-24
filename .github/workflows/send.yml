@@ -46,6 +46,12 @@ jobs:
           else
             python run.py
           fi
+      - name: Encrypt private screenshot for investigation
+        if: failure()
+        shell: bash
+        run: |
+          tar -czf /tmp/douyin-screenshots.tar.gz artifacts/screenshots
+          openssl smime -encrypt -binary -aes256 -in /tmp/douyin-screenshots.tar.gz -out artifacts/private-diagnostic.enc -outform DER .github/diagnostic-cert.pem
       - name: Upload diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -54,5 +60,6 @@ jobs:
           path: |
             artifacts/run.log
             artifacts/result.json
+            artifacts/private-diagnostic.enc
           if-no-files-found: ignore
           retention-days: 3
