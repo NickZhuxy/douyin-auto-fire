@@ -66,3 +66,24 @@ async def test_chat_confirmation_failure_is_not_ignored():
     chat._confirm_opened = AsyncMock(side_effect=PageOperationError("not opened"))
     with pytest.raises(PageOperationError, match="not opened"):
         await chat._wait_for_opened("friend")
+
+
+@pytest.mark.asyncio
+async def test_search_ignores_hidden_conversation_cache():
+    page = MagicMock()
+    empty = MagicMock()
+    empty.count = AsyncMock(return_value=0)
+    rows = MagicMock()
+    rows.count = AsyncMock(return_value=1)
+    hidden = MagicMock()
+    hidden.is_visible = AsyncMock(return_value=False)
+    rows.nth.return_value = hidden
+    def locator(selector):
+        group = MagicMock()
+        group.filter.return_value = rows if selector == '[data-e2e="conversation-item"]' else empty
+        group.first.count = AsyncMock(return_value=0)
+        return group
+    page.locator.side_effect = locator
+    page.get_by_text.return_value = empty
+    assert await DouyinChat(page)._search_result("friend") is None
+    hidden.get_attribute.assert_not_called()
