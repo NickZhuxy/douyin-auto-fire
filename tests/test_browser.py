@@ -98,3 +98,37 @@ async def test_unloaded_chat_is_not_reported_as_expired_login():
     with patch("app.browser._any_visible", new=AsyncMock(return_value=False)):
         with pytest.raises(PageLoadError, match="未加载完成"):
             await open_private_messages(page)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('authenticated', [False, True])
+async def test_only_verified_sessions_persist_refreshed_cookies(tmp_path, authenticated):
+    import json
+    from types import SimpleNamespace
+    from app.browser import open_douyin
+    seed = [{'name': 'sessionid', 'value': 'seed', 'domain': '.douyin.com'}]
+    refreshed = [{'name': 'sessionid', 'value': 'refreshed', 'domain': '.douyin.com'}]
+    settings = SimpleNamespace(headless=True, browser_path=None, storage_state=None,
+                               cookie=json.dumps(seed), trace=False, artifacts_dir=tmp_path)
+    context = MagicMock()
+    context.add_cookies = AsyncMock()
+    context.new_page = AsyncMock()
+    context.cookies = AsyncMock(return_value=refreshed)
+    context.close = AsyncMock()
+    browser = MagicMock()
+    browser.new_context = AsyncMock(return_value=context)
+    browser.close = AsyncMock()
+    playwright = MagicMock()
+    playwright.chromium.launch = AsyncMock(return_value=browser)
+    playwright.stop = AsyncMock()
+    starter = MagicMock()
+    starter.start = AsyncMock(return_value=playwright)
+    cache = MagicMock()
+    cache.read_cookies.return_value = refreshed
+    with patch('app.browser.async_playwright', return_value=starter), patch('app.browser.SessionState.from_env', return_value=cache), patch('app.browser.verify_login', new=AsyncMock()):
+        async with open_douyin(settings) as session:
+            session.authenticated = authenticated
+    assert context.add_cookies.await_args.args[0][0]['value'] == 'refreshed'
+    assert cache.write_cookies.call_count == int(authenticated)
+    assert (tmp_path / 'session.updated').exists() == authenticated
+    context.close.assert_awaited_once()

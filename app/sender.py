@@ -18,7 +18,8 @@ LATEST_OUTGOING_MESSAGE = (
 STICKER_CONFIRM_ANCHOR = "data-douyin-sender-anchor"
 TEXT_CONFIRM_TIMEOUT_MS = 30_000
 TEXT_CONFIRM_GRACE_MS = 2_000
-STICKER_FAILURE_MARKERS = (
+SEND_FAILURE_GRACE_MS = 3_000
+SEND_FAILURE_MARKERS = (
     "text=发送失败",
     '[aria-label*="重试"]',
     '[title*="重试"]',
@@ -61,32 +62,37 @@ async def send_text(chat: DouyinChat, content: str) -> None:
 async def _confirm_text_sent(page: Page, before: tuple[str, str], content: str) -> None:
     anchor, before_content = before
     try:
-        await page.wait_for_function(
-            """([selector, anchor, previousContent, expectedText]) => {
-                const message = document.querySelector(selector);
-                if (!message) return false;
-                const body = message.querySelector('[data-e2e="msg-item-content"]') || message;
-                const isNewMessage =
-                    message.getAttribute('data-douyin-sender-anchor') !== anchor ||
-                    body.innerHTML !== previousContent;
-                if (!isNewMessage) return false;
-                const normalize = value => (value || '').normalize().replace(/\\s+/g, ' ').trim();
-                return normalize(body.textContent).includes(normalize(expectedText));
-            }""",
-            arg=[LATEST_OUTGOING_MESSAGE, anchor, before_content, content],
-            timeout=TEXT_CONFIRM_TIMEOUT_MS,
-        )
-    except Exception as exc:
-        # The Douyin page can receive its own message just after Playwright's wait
-        # expires, especially when the runner's IM WebSocket reconnects. Give the
-        # DOM one final short window and inspect the newest outgoing message directly.
-        await page.wait_for_timeout(TEXT_CONFIRM_GRACE_MS)
         try:
-            confirmed = await _latest_outgoing_text_matches(page, anchor, before_content, content)
-        except Exception:
-            confirmed = False
-        if not confirmed:
-            raise PageOperationError("文字消息已触发发送，但无法确认是否发送成功；为避免重复不会自动重试") from exc
+            await page.wait_for_function(
+                """([selector, anchor, previousContent, expectedText]) => {
+                    const message = document.querySelector(selector);
+                    if (!message) return false;
+                    const body = message.querySelector('[data-e2e="msg-item-content"]') || message;
+                    const isNewMessage =
+                        message.getAttribute('data-douyin-sender-anchor') !== anchor ||
+                        body.innerHTML !== previousContent;
+                    if (!isNewMessage) return false;
+                    const normalize = value => (value || '').normalize().replace(/\\s+/g, ' ').trim();
+                    return normalize(body.textContent).includes(normalize(expectedText));
+                }""",
+                arg=[LATEST_OUTGOING_MESSAGE, anchor, before_content, content],
+                timeout=TEXT_CONFIRM_TIMEOUT_MS,
+            )
+        except Exception as exc:
+            # The Douyin page can receive its own message just after Playwright's wait
+            # expires, especially when the runner's IM WebSocket reconnects. Give the
+            # DOM one final short window and inspect the newest outgoing message directly.
+            await page.wait_for_timeout(TEXT_CONFIRM_GRACE_MS)
+            try:
+                confirmed = await _latest_outgoing_text_matches(page, anchor, before_content, content)
+            except Exception:
+                confirmed = False
+            if not confirmed:
+                raise PageOperationError("文字消息已触发发送，但无法确认是否发送成功；为避免重复不会自动重试") from exc
+        # An outgoing bubble is optimistic UI: the server can reject it shortly
+        # afterwards. Check the same failure indicators used for stickers.
+        await page.wait_for_timeout(SEND_FAILURE_GRACE_MS)
+        await _raise_if_send_failed(page, "文字消息")
     finally:
         await _clear_confirmation_anchors(page)
 
@@ -232,18 +238,22 @@ async def _confirm_sticker_sent(
             arg=[LATEST_OUTGOING_MESSAGE, anchor, before_content, resource_key],
             timeout=15_000,
         )
-        await page.wait_for_timeout(3_000)
-        latest = page.locator(LATEST_OUTGOING_MESSAGE).first
-        for selector in STICKER_FAILURE_MARKERS:
-            marker = latest.locator(selector).first
-            if await marker.count() and await marker.is_visible():
-                raise PageOperationError(f"原生表情“{name}”发送失败，页面提示可以重试")
+        await page.wait_for_timeout(SEND_FAILURE_GRACE_MS)
+        await _raise_if_send_failed(page, f"原生表情“{name}”")
     except PageOperationError:
         raise
     except Exception as exc:
         raise PageOperationError(f"原生表情“{name}”已点击，但没有检测到新的已发送消息") from exc
     finally:
         await _clear_confirmation_anchors(page)
+
+
+async def _raise_if_send_failed(page: Page, message_label: str) -> None:
+    latest = page.locator(LATEST_OUTGOING_MESSAGE).first
+    for selector in SEND_FAILURE_MARKERS:
+        marker = latest.locator(selector).first
+        if await marker.count() and await marker.is_visible():
+            raise PageOperationError(f"{message_label}发送失败，页面提示可以重试")
 
 
 async def _clear_confirmation_anchors(page: Page) -> None:

@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
@@ -6,6 +6,8 @@ from app.models import Message
 from app.douyin import PageOperationError
 from app.sender import (
     LATEST_OUTGOING_MESSAGE,
+    SEND_FAILURE_GRACE_MS,
+    SEND_FAILURE_MARKERS,
     TEXT_CONFIRM_GRACE_MS,
     TEXT_CONFIRM_TIMEOUT_MS,
     _confirm_sticker_sent,
@@ -13,6 +15,13 @@ from app.sender import (
     _sticker_resource_key,
     send_message,
 )
+
+
+def _failure_marker_group(visible: bool = False):
+    group = MagicMock()
+    group.first.count = AsyncMock(return_value=1)
+    group.first.is_visible = AsyncMock(return_value=visible)
+    return group
 
 
 @pytest.mark.asyncio
@@ -28,6 +37,8 @@ async def test_random_message_delegates_to_selected_choice(monkeypatch) -> None:
     page.keyboard.insert_text = AsyncMock()
     page.keyboard.press = AsyncMock()
     page.wait_for_function = AsyncMock()
+    page.wait_for_timeout = AsyncMock()
+    latest.locator.return_value = _failure_marker_group()
     editor.page = page
     chat = AsyncMock()
     chat.message_input.return_value = editor
@@ -45,8 +56,10 @@ async def test_random_message_delegates_to_selected_choice(monkeypatch) -> None:
 async def test_text_confirmation_tracks_newest_outgoing_message() -> None:
     page = MagicMock()
     page.wait_for_function = AsyncMock()
+    page.wait_for_timeout = AsyncMock()
     anchors = MagicMock()
     anchors.evaluate_all = AsyncMock()
+    anchors.first.locator.return_value = _failure_marker_group()
     page.locator.return_value = anchors
 
     await _confirm_text_sent(page, ("anchor", "old-content"), "续火花 ✨")
@@ -58,6 +71,7 @@ async def test_text_confirmation_tracks_newest_outgoing_message() -> None:
         "续火花 ✨",
     ]
     assert page.wait_for_function.await_args.kwargs["timeout"] == TEXT_CONFIRM_TIMEOUT_MS
+    page.wait_for_timeout.assert_awaited_once_with(SEND_FAILURE_GRACE_MS)
     anchors.evaluate_all.assert_awaited_once()
 
 
@@ -77,14 +91,50 @@ async def test_text_confirmation_accepts_message_arriving_during_grace_period() 
     body.count = AsyncMock(return_value=1)
     body.inner_html = AsyncMock(return_value="<span>续火花 ✨</span>")
     body.inner_text = AsyncMock(return_value="续火花 ✨")
-    latest.locator.return_value = body_group
+    failure_group = _failure_marker_group()
+    latest.locator.side_effect = lambda selector: body_group if selector == '[data-e2e="msg-item-content"]' else failure_group
     anchors = MagicMock()
     anchors.evaluate_all = AsyncMock()
     page.locator.side_effect = lambda selector: latest_group if selector == LATEST_OUTGOING_MESSAGE else anchors
 
     await _confirm_text_sent(page, ("anchor", "old-content"), "续火花 ✨")
 
-    page.wait_for_timeout.assert_awaited_once_with(TEXT_CONFIRM_GRACE_MS)
+    assert page.wait_for_timeout.await_args_list == [call(TEXT_CONFIRM_GRACE_MS), call(SEND_FAILURE_GRACE_MS)]
+    anchors.evaluate_all.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_selector", SEND_FAILURE_MARKERS)
+@pytest.mark.parametrize("arrives_during_grace", [False, True])
+async def test_text_confirmation_rejects_optimistic_bubble_with_send_failure(
+    failure_selector: str, arrives_during_grace: bool,
+) -> None:
+    page = MagicMock()
+    page.wait_for_function = AsyncMock(side_effect=TimeoutError if arrives_during_grace else None)
+    page.wait_for_timeout = AsyncMock()
+    latest_group = MagicMock()
+    latest = latest_group.first
+    latest.count = AsyncMock(return_value=1)
+    latest.get_attribute = AsyncMock(return_value=None)
+    body_group = MagicMock()
+    body_group.first.count = AsyncMock(return_value=1)
+    body_group.first.inner_html = AsyncMock(return_value="<span>续火花 ✨</span>")
+    body_group.first.inner_text = AsyncMock(return_value="续火花 ✨")
+    failed = _failure_marker_group(visible=True)
+    hidden = _failure_marker_group()
+    latest.locator.side_effect = lambda selector: (
+        body_group if selector == '[data-e2e="msg-item-content"]'
+        else failed if selector == failure_selector else hidden
+    )
+    anchors = MagicMock()
+    anchors.evaluate_all = AsyncMock()
+    page.locator.side_effect = lambda selector: latest_group if selector == LATEST_OUTGOING_MESSAGE else anchors
+
+    with pytest.raises(PageOperationError, match="文字消息发送失败"):
+        await _confirm_text_sent(page, ("anchor", "old-content"), "续火花 ✨")
+
+    page.wait_for_timeout.assert_any_await(SEND_FAILURE_GRACE_MS)
+    failed.first.is_visible.assert_awaited_once()
     anchors.evaluate_all.assert_awaited_once()
 
 
