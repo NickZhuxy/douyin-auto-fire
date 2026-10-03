@@ -65,6 +65,7 @@ async def run(dry_run: bool = False, env_file: str | None = None) -> int:
                     try:
                         LOGGER.info("处理好友: %s", target.name)
                         await chat.open_target(target.name)
+                        session.authenticated = True
                         if not dry_run:
                             for message_index, message in enumerate(target.messages):
                                 message_id = _message_id(message_index, message)
@@ -76,15 +77,16 @@ async def run(dry_run: bool = False, env_file: str | None = None) -> int:
                                         message_index + 1,
                                     )
                                     continue
+                                await verify_login(page, timeout_ms=3_000)
                                 if task.prevent_duplicates:
                                     history.reserve(key)
-                                await verify_login(page, timeout_ms=3_000)
                                 await send_message(page, chat, message, task.stickers)
                                 if task.prevent_duplicates:
                                     history.mark_success(key)
                                 sent += 1
                         results.append(TargetResult(target=target.name, status="success", sent=sent))
                     except (AuthenticationError, RiskControlError) as exc:
+                        session.authenticated = False
                         LOGGER.exception("处理好友时登录状态失效: %s", target.name)
                         screenshot = await _screenshot(page, settings.artifacts_dir, f"{index + 1}-{target.name}")
                         if screenshot:

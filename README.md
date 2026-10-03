@@ -50,6 +50,7 @@
 | --- | --- | --- |
 | `DOUYIN_COOKIE` | 上一步导出的 Cookie JSON | 是 |
 | `DOUYIN_CONFIG` | 完整发送配置 JSON | 是 |
+| `DOUYIN_STATE_KEY` | 32 字节随机密钥的 URL-safe Base64，用于加密保存刷新后的 Cookie | 建议 |
 | `DINGTALK_WEBHOOK` | 钉钉机器人 Webhook | 否 |
 | `DINGTALK_SECRET` | 钉钉机器人 Secret | 否 |
 
@@ -158,7 +159,18 @@ schedule:
 
 定时触发会直接真实发送，不会自动 Dry Run。
 
-## 7. Cookie 失效
+## 7. Cookie 持续刷新与登录失效
+
+配置 `DOUYIN_STATE_KEY` 后，工作流会在确认好友聊天和输入框可用后，
+把浏览器当前 Cookie 加密保存到 Actions cache；下一次运行恢复最新已验证的 Cookie。
+密钥只放在 Secrets 中，缓存不包含明文 Cookie，也不保存 localStorage。
+手动更新 `DOUYIN_COOKIE` 会使旧会话缓存不再匹配，从新的 Cookie 开始。
+
+这解决了每次运行丢弃刷新 Cookie 的问题，但无法保证抖音不会撤销会话或要求再次扫码。
+明确的登录/安全验证失败不会覆盖之前的会话缓存；缓存解密失败会停止任务。
+发送历史目前只在单次 runner 内保存，因此不要通过重复触发工作流重试结果不确定的消息。
+
+### 重新登录
 
 如果日志提示登录失效或安全验证：
 

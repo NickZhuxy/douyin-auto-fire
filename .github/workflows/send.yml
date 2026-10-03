@@ -22,6 +22,7 @@ jobs:
     permissions:
       contents: read
     env:
+      DOUYIN_STATE_KEY: ${{ secrets.DOUYIN_STATE_KEY }}
       DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
       DOUYIN_CONFIG: ${{ secrets.DOUYIN_CONFIG }}
       DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
@@ -34,6 +35,14 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt
       - run: python -m playwright install --with-deps chromium
+      - name: Restore encrypted browser cookies
+        if: env.DOUYIN_STATE_KEY != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: artifacts/session.enc
+          key: douyin-session-v1-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            douyin-session-v1-${{ github.ref_name }}-
       - name: Write protected configuration
         shell: bash
         run: printf '%s' "$DOUYIN_CONFIG" > config.json
@@ -45,6 +54,12 @@ jobs:
           else
             python run.py
           fi
+      - name: Save verified browser cookies
+        if: always() && hashFiles('artifacts/session.updated') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: artifacts/session.enc
+          key: douyin-session-v1-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

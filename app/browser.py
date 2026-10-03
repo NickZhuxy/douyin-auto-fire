@@ -12,6 +12,7 @@ from playwright.async_api import Browser, BrowserContext, Page, Playwright, asyn
 
 from app.config import ConfigError, parse_auth_json
 from app.models import Settings
+from app.session_state import SessionState
 from app.selectors import DOUYIN_CHAT_URL, LOGIN_MARKERS, LOGIN_REQUIRED_MARKERS, RISK_MARKERS
 
 
@@ -31,6 +32,7 @@ class RiskControlError(RuntimeError):
 class BrowserSession:
     page: Page
     context: BrowserContext
+    authenticated: bool = False
 
 
 @asynccontextmanager
@@ -38,6 +40,8 @@ async def open_douyin(settings: Settings) -> AsyncIterator[BrowserSession]:
     playwright: Playwright | None = None
     browser: Browser | None = None
     context: BrowserContext | None = None
+    session: BrowserSession | None = None
+    saved_session: SessionState | None = None
     try:
         playwright = await async_playwright().start()
         launch_args = {"headless": settings.headless}
@@ -56,6 +60,11 @@ async def open_douyin(settings: Settings) -> AsyncIterator[BrowserSession]:
             cookies = parse_auth_json(settings.cookie, "DOUYIN_COOKIE")
             if not isinstance(cookies, list):
                 raise ConfigError("DOUYIN_COOKIE 必须是 Cookie 数组")
+            saved_session = SessionState.from_env()
+            refreshed = saved_session.read_cookies() if saved_session else None
+            if refreshed is not None:
+                cookies = refreshed
+                logging.getLogger("douyin_sender").info("已恢复上次验证后保存的加密登录 Cookie")
             normalized = _normalize_cookies(cookies)
             logging.getLogger("douyin_sender").info(
                 "Cookie metadata (no values): %s", _auth_cookie_summary(normalized)
@@ -65,14 +74,26 @@ async def open_douyin(settings: Settings) -> AsyncIterator[BrowserSession]:
         page = await context.new_page()
         if settings.trace:
             await context.tracing.start(screenshots=True, snapshots=True, sources=False)
-        yield BrowserSession(page=page, context=context)
+        session = BrowserSession(page=page, context=context)
+        yield session
     finally:
-        if context:
-            await context.close()
-        if browser:
-            await browser.close()
-        if playwright:
-            await playwright.stop()
+        try:
+            if context and saved_session and session and session.authenticated:
+                await verify_login(session.page, timeout_ms=3_000)
+                cookies = [c for c in await context.cookies()
+                           if c["domain"].lstrip(".") == "douyin.com" or c["domain"].endswith(".douyin.com")]
+                saved_session.write_cookies(cookies)
+                marker = settings.artifacts_dir / "session.updated"
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.touch()
+                logging.getLogger("douyin_sender").info("已加密保存本次浏览器 Cookie，供下次任务继续使用")
+        finally:
+            if context:
+                await context.close()
+            if browser:
+                await browser.close()
+            if playwright:
+                await playwright.stop()
 
 
 async def verify_login(page: Page, timeout_ms: int = 15_000) -> None:
