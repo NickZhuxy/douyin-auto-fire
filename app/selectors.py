@@ -4,6 +4,9 @@ DOUYIN_CHAT_URL = "https://www.douyin.com/chat"
 CHAT_READY_MARKERS = (
     'input[placeholder="搜索用户名字"]',
     '[role="textbox"][placeholder="搜索用户名字"]',
+    # This chat layout shares its placeholder with the site's general search.
+    '.componentsLeftPanelwrapper .LeftPanelHeadersearch input[placeholder="搜索"]',
+    '.componentsLeftPanelwrapper .LeftPanelHeadersearch [role="textbox"][placeholder="搜索"]',
 )
 LOGIN_MARKERS = CHAT_READY_MARKERS
 LOGIN_REQUIRED_MARKERS = (
