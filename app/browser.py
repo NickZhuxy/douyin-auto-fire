@@ -13,7 +13,7 @@ from playwright.async_api import Browser, BrowserContext, Page, Playwright, asyn
 from app.config import ConfigError, parse_auth_json
 from app.models import Settings
 from app.session_state import SessionState
-from app.selectors import DOUYIN_CHAT_URL, LOGIN_MARKERS, LOGIN_REQUIRED_MARKERS, RISK_MARKERS
+from app.selectors import CHAT_READY_MARKERS, DOUYIN_CHAT_URL, LOGIN_REQUIRED_MARKERS, RISK_MARKERS
 
 
 class AuthenticationError(RuntimeError):
@@ -61,6 +61,8 @@ async def open_douyin(settings: Settings) -> AsyncIterator[BrowserSession]:
             if not isinstance(cookies, list):
                 raise ConfigError("DOUYIN_COOKIE 必须是 Cookie 数组")
             saved_session = SessionState.from_env()
+            if saved_session:
+                (settings.artifacts_dir / "session.updated").unlink(missing_ok=True)
             refreshed = saved_session.read_cookies() if saved_session else None
             if refreshed is not None:
                 cookies = refreshed
@@ -79,9 +81,13 @@ async def open_douyin(settings: Settings) -> AsyncIterator[BrowserSession]:
     finally:
         try:
             if context and saved_session and session and session.authenticated:
-                await verify_login(session.page, timeout_ms=3_000)
-                cookies = [c for c in await context.cookies()
-                           if c["domain"].lstrip(".") == "douyin.com" or c["domain"].endswith(".douyin.com")]
+                verification_page = await context.new_page()
+                try:
+                    await open_private_messages(verification_page)
+                    cookies = [c for c in await context.cookies()
+                               if c["domain"].lstrip(".") == "douyin.com" or c["domain"].endswith(".douyin.com")]
+                finally:
+                    await verification_page.close()
                 saved_session.write_cookies(cookies)
                 marker = settings.artifacts_dir / "session.updated"
                 marker.parent.mkdir(parents=True, exist_ok=True)
@@ -97,22 +103,35 @@ async def open_douyin(settings: Settings) -> AsyncIterator[BrowserSession]:
 
 
 async def verify_login(page: Page, timeout_ms: int = 15_000) -> None:
-    if await _any_visible(page, RISK_MARKERS, timeout_ms=2_000):
-        raise RiskControlError("抖音要求进行安全验证，任务已停止")
-    if await _any_visible(page, LOGIN_REQUIRED_MARKERS, timeout_ms=2_000):
-        raise AuthenticationError("抖音登录状态已失效")
-    if not await _any_visible(page, LOGIN_MARKERS, timeout_ms=timeout_ms):
-        raise AuthenticationError("未检测到抖音私信页面，登录状态可能失效或页面结构已变化")
+    await _wait_for_chat_ready(page, timeout_ms)
 
 
 async def open_private_messages(page: Page, timeout_ms: int = 60_000) -> None:
     await page.goto(DOUYIN_CHAT_URL, wait_until="domcontentloaded", timeout=45_000)
-    if await _any_visible(page, RISK_MARKERS, timeout_ms=2_000):
-        raise RiskControlError("抖音私信页面要求进行安全验证，任务已停止")
-    if await _any_visible(page, LOGIN_REQUIRED_MARKERS, timeout_ms=2_000):
-        raise AuthenticationError("进入抖音私信页面后登录状态失效")
-    if not await _any_visible(page, ('input[placeholder*="搜索"]', '[role="textbox"][placeholder*="搜索"]'), timeout_ms):
-        raise PageLoadError("抖音聊天页面未加载完成：等待好友搜索框超时，不能据此判定登录失效")
+    await _wait_for_chat_ready(page, timeout_ms)
+
+
+async def _wait_for_chat_ready(page: Page, timeout_ms: int) -> None:
+    deadline = time.monotonic() + timeout_ms / 1_000
+    login_grace_seconds = min(5, timeout_ms / 1_000)
+    login_visible_since: float | None = None
+    while True:
+        if await _any_visible_now(page, RISK_MARKERS):
+            raise RiskControlError("抖音私信页面要求进行安全验证，任务已停止")
+        login_required = await _any_visible_now(page, LOGIN_REQUIRED_MARKERS)
+        now = time.monotonic()
+        if login_required:
+            if login_visible_since is None:
+                login_visible_since = now
+            if now >= deadline and now - login_visible_since >= login_grace_seconds:
+                raise AuthenticationError("进入抖音私信页面后登录状态失效")
+        else:
+            login_visible_since = None
+            if await _any_visible_now(page, CHAT_READY_MARKERS):
+                return
+        if now >= deadline:
+            raise PageLoadError("抖音聊天页面未加载完成：等待好友搜索框超时，不能据此判定登录失效")
+        await page.wait_for_timeout(min(250, (deadline - now) * 1_000))
 
 
 async def save_trace(session: BrowserSession, path: Path) -> None:
@@ -120,14 +139,10 @@ async def save_trace(session: BrowserSession, path: Path) -> None:
     await session.context.tracing.stop(path=path)
 
 
-async def _any_visible(page: Page, selectors: tuple[str, ...], timeout_ms: int) -> bool:
-    per_selector = max(250, timeout_ms // max(1, len(selectors)))
+async def _any_visible_now(page: Page, selectors: tuple[str, ...]) -> bool:
     for selector in selectors:
-        try:
-            await page.locator(selector).first.wait_for(state="visible", timeout=per_selector)
+        if await page.locator(selector).first.is_visible():
             return True
-        except Exception:
-            continue
     return False
 
 
