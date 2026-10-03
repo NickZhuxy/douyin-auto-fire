@@ -1,24 +1,33 @@
 name: Send Douyin Messages
+
 on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Read-only diagnostics only on this branch
+        description: Only verify login and friends without sending
         type: boolean
-        default: true
+        default: false
+  schedule:
+    - cron: "0 0 * * *"
+      timezone: "Asia/Shanghai"
+
 concurrency:
   group: douyin-daily-sender
   cancel-in-progress: false
+
 jobs:
-  diagnose:
+  send:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
       DOUYIN_STATE_KEY: ${{ secrets.DOUYIN_STATE_KEY }}
       DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
       DOUYIN_CONFIG: ${{ secrets.DOUYIN_CONFIG }}
+      DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+      DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+      HEADLESS: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,11 +35,52 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt
       - run: python -m playwright install --with-deps chromium
-      - name: Restore last production session for read-only diagnosis
+      - name: Restore encrypted browser cookies
+        if: env.DOUYIN_STATE_KEY != ''
         uses: actions/cache/restore@v4
         with:
           path: artifacts/session.enc
-          key: douyin-session-v1-main-37141119396-1
+          key: douyin-session-v1-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            douyin-session-v1-${{ github.ref_name }}-
+      - name: Write protected configuration
+        shell: bash
+        run: printf '%s' "$DOUYIN_CONFIG" > config.json
+      - name: Run
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            python run.py --dry-run
+          else
+            python run.py
+          fi
+      - name: Save verified browser cookies
+        if: always() && hashFiles('artifacts/session.updated') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: artifacts/session.enc
+          key: douyin-session-v1-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify encrypted cookies were persisted
+        id: session-cache-check
+        if: always() && hashFiles('artifacts/session.updated') != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: artifacts/session.enc
+          key: douyin-session-v1-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          lookup-only: true
           fail-on-cache-miss: true
-      - name: Diagnose without sending or changing credentials
-        run: python scripts/diagnose_auth.py --network
+      - name: Fail when refreshed login could not be persisted
+        if: always() && hashFiles('artifacts/session.updated') != '' && steps.session-cache-check.outputs.cache-hit != 'true'
+        run: |
+          echo '::error::Refreshed login cookies were not persisted. The next run cannot reuse this session.'
+          exit 1
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-failure-${{ github.run_id }}
+          path: |
+            artifacts/run.log
+            artifacts/result.json
+          if-no-files-found: ignore
+          retention-days: 3

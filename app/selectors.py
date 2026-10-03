@@ -1,11 +1,11 @@
 DOUYIN_CHAT_URL = "https://www.douyin.com/chat"
 
 # Ordered alternatives keep page-specific changes isolated from the workflow.
-LOGIN_MARKERS = (
-    'text=私信',
-    'input[placeholder*="搜索"]',
-    '[role="textbox"][placeholder*="搜索"]',
+CHAT_READY_MARKERS = (
+    'input[placeholder="搜索用户名字"]',
+    '[role="textbox"][placeholder="搜索用户名字"]',
 )
+LOGIN_MARKERS = CHAT_READY_MARKERS
 LOGIN_REQUIRED_MARKERS = (
     'text=扫码登录',
     'text=验证码登录',
@@ -16,10 +16,7 @@ RISK_MARKERS = (
     'text=完成验证',
     'text=验证身份',
 )
-SEARCH_INPUTS = (
-    'input[placeholder*="搜索"]',
-    '[role="textbox"][placeholder*="搜索"]',
-)
+SEARCH_INPUTS = CHAT_READY_MARKERS
 MESSAGE_INPUTS = (
     '[data-contents="true"]',
     '.DraftEditor-editor [contenteditable="true"]',
