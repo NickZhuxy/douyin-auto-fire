@@ -68,6 +68,33 @@ def test_new_nonce_each_write(state: SessionState) -> None:
     assert state.read_cookies() == COOKIES
 
 
+def test_context_cookies_with_empty_name_persist_named_login_cookies(state: SessionState) -> None:
+    # Real Chromium can recreate an unnamed cookie after importing the seed.
+    # It must not prevent saving the refreshed, named authentication cookie.
+    unnamed = {**COOKIES[0], "name": "", "value": "unnamed-cookie-value"}
+    browser_cookies = [COOKIES[0].copy(), unnamed]
+
+    state.write_cookies(browser_cookies)
+
+    assert state.read_cookies() == COOKIES
+    assert browser_cookies == [COOKIES[0], unnamed]
+    assert len(browser_cookies) == 2
+
+
+@pytest.mark.parametrize("partition_key", [None, "https://example.com"])
+def test_optional_playwright_partition_key_roundtrips(state: SessionState, partition_key: str | None) -> None:
+    cookies = [{**COOKIES[0], "partitionKey": partition_key}]
+    state.write_cookies(cookies)
+    assert state.read_cookies() == cookies
+
+
+def test_unnamed_cookie_still_rejects_non_cookie_data(state: SessionState) -> None:
+    cookies = [*COOKIES, {**COOKIES[0], "name": "", "localStorage": {"private": "data"}}]
+    with pytest.raises(ConfigError, match="格式无效"):
+        state.write_cookies(cookies)
+    assert not state.path.exists()
+
+
 def test_manual_cookie_refresh_invalidates_cache(state: SessionState, monkeypatch: pytest.MonkeyPatch) -> None:
     state.write_cookies(COOKIES)
     monkeypatch.setenv("DOUYIN_COOKIE", "sessionid=new-manual-login")
@@ -163,7 +190,7 @@ def test_authenticated_but_invalid_payload_fails_closed(state: SessionState, pay
         state.read_cookies()
 
 
-@pytest.mark.parametrize("cookies", [None, {}, ["bad"], [{"name": "sessionid", "value": "secret"}], [{**COOKIES[0], "expires": float("nan")}], [{**COOKIES[0], "secure": "true"}], [{**COOKIES[0], "sameSite": "invalid"}], [{**COOKIES[0], "localStorage": {"private": "data"}}]])
+@pytest.mark.parametrize("cookies", [None, {}, ["bad"], [{"name": "sessionid", "value": "secret"}], [{**COOKIES[0], "expires": float("nan")}], [{**COOKIES[0], "secure": "true"}], [{**COOKIES[0], "sameSite": "invalid"}], [{**COOKIES[0], "localStorage": {"private": "data"}}], [{**COOKIES[0], "partitionKey": {"origin": "https://example.com"}}]])
 def test_invalid_cookies_are_never_written(state: SessionState, cookies: object) -> None:
     with pytest.raises(ConfigError, match="格式无效"):
         state.write_cookies(cookies)

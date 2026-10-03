@@ -97,6 +97,9 @@ class SessionState:
     def write_cookies(self, cookies: list[dict[str, Any]]) -> None:
         if not _valid_cookies(cookies):
             raise ConfigError("会话 Cookie 格式无效")
+        # Chromium can return cookies whose name is empty. The browser import
+        # already skips these; keep the persisted set consistent with import.
+        cookies = [cookie for cookie in cookies if cookie["name"]]
         payload = {"version": 1, "seed_sha256": self._seed_hash, "cookies": cookies}
         try:
             cleartext = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
@@ -137,7 +140,7 @@ def _valid_cookies(cookies: Any) -> bool:
             return False
         if any(not isinstance(cookie.get(field), str) for field in ("name", "value", "domain", "path")):
             return False
-        if not cookie["name"] or not cookie["domain"] or not cookie["path"]:
+        if not cookie["domain"] or not cookie["path"]:
             return False
         if any(field in cookie and not isinstance(cookie[field], bool) for field in ("secure", "httpOnly")):
             return False
@@ -148,6 +151,6 @@ def _valid_cookies(cookies: Any) -> bool:
             return False
         if "sameSite" in cookie and cookie["sameSite"] not in ("Strict", "Lax", "None"):
             return False
-        if "partitionKey" in cookie and not isinstance(cookie["partitionKey"], str):
+        if cookie.get("partitionKey") is not None and not isinstance(cookie["partitionKey"], str):
             return False
     return True
