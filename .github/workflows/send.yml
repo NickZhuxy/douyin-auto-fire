@@ -60,6 +60,20 @@ jobs:
         with:
           path: artifacts/session.enc
           key: douyin-session-v1-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify encrypted cookies were persisted
+        id: session-cache-check
+        if: always() && hashFiles('artifacts/session.updated') != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: artifacts/session.enc
+          key: douyin-session-v1-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          lookup-only: true
+          fail-on-cache-miss: true
+      - name: Fail when refreshed login could not be persisted
+        if: always() && hashFiles('artifacts/session.updated') != '' && steps.session-cache-check.outputs.cache-hit != 'true'
+        run: |
+          echo '::error::Refreshed login cookies were not persisted. The next run cannot reuse this session.'
+          exit 1
       - name: Upload diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
