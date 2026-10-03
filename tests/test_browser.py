@@ -21,16 +21,24 @@ class PollingPage:
 
     def locator(self, selector):
         from types import SimpleNamespace
-        from app.selectors import CHAT_READY_MARKERS, LOGIN_REQUIRED_MARKERS, RISK_MARKERS
+        from app.selectors import LOGIN_REQUIRED_MARKERS, RISK_MARKERS
 
         async def is_visible():
             self.checked_selectors.append(selector)
             state = next(state for at, state in reversed(self.transitions) if at <= self.now)
             return (
-                (state == "ready" and selector in CHAT_READY_MARKERS)
+                (state == "ready" and selector == 'input[placeholder="搜索用户名字"]')
+                or (state == "ready_textbox" and selector == '[role="textbox"][placeholder="搜索用户名字"]')
+                or (state == "legacy_chat" and selector == '.componentsLeftPanelwrapper .LeftPanelHeadersearch input[placeholder="搜索"]')
+                or (state == "legacy_chat_textbox" and selector == '.componentsLeftPanelwrapper .LeftPanelHeadersearch [role="textbox"][placeholder="搜索"]')
                 or (state == "login" and selector in LOGIN_REQUIRED_MARKERS)
                 or (state == "risk" and selector in RISK_MARKERS)
-                or (state == "general_search" and selector == 'input[placeholder*="搜索"]')
+                or (state == "general_search" and selector in {
+                    'input[placeholder*="搜索"]',
+                    '[role="textbox"][placeholder*="搜索"]',
+                    'input[placeholder="搜索"]',
+                    '[role="textbox"][placeholder="搜索"]',
+                })
             )
 
         return SimpleNamespace(first=SimpleNamespace(is_visible=AsyncMock(side_effect=is_visible)))
@@ -46,8 +54,9 @@ def polling_page(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_opens_chat_directly_before_checking_login(polling_page) -> None:
-    page = polling_page([(0, "ready")])
+@pytest.mark.parametrize("state", ["ready", "ready_textbox", "legacy_chat", "legacy_chat_textbox"])
+async def test_opens_chat_directly_before_checking_login(polling_page, state) -> None:
+    page = polling_page([(0, state)])
     await open_private_messages(page)
     page.goto.assert_awaited_once_with(DOUYIN_CHAT_URL, wait_until="domcontentloaded", timeout=45_000)
 
